@@ -1,4 +1,7 @@
 import express from "express";
+import { db } from "./db.js";
+import { cars } from "./schema.js";
+import { asc, eq } from "drizzle-orm";
 
 const app = express();
 const PORT = 3000;
@@ -6,12 +9,6 @@ const PORT = 3000;
 const router = express.Router();
 
 app.use(express.json());
-
-let cars = [
-	{ id: 1, make: "Toyota", model: "Camry", year: 2022, price: 28000 },
-	{ id: 2, make: "Tesla", model: "Model S", year: 2023, price: 25000 },
-	{ id: 3, make: "Ford", model: "F-150", year: 2021, price: 35000 },
-];
 
 app.use((req, res, next) => {
 	const timestamp = new Date().toISOString();
@@ -23,11 +20,24 @@ app.get("/", (req, res) => {
 	res.send("Hello from Car API!");
 });
 
-router.get("/cars", (req, res) => {
-	res.json(cars);
+// GET /cars
+router.get("/", async (req, res) => {
+	const allCars = await db.select().from(cars).orderBy(asc(cars.id));
+	res.json(allCars);
 });
 
-router.post("/cars", (req, res) => {
+// GET CARS by ID
+router.get("/:id", async (req, res) => {
+	const carId = parseInt(req.params.id);
+	const car = await db.select().from(cars).where(eq(cars.id, carId));
+	if (car.length === 0) {
+		return res.status(404).json({ error: "Car not found" });
+	}
+	res.json(car);
+});
+
+// POST /cars
+router.post("/", async (req, res) => {
 	const { make, model, year, price } = req.body;
 
 	if (!make || !model || !year || !price) {
@@ -36,67 +46,48 @@ router.post("/cars", (req, res) => {
 		});
 	}
 
-	const nextId = cars.length + 1;
-
-	const newCar = {
-		id: nextId,
-		make,
-		model,
-		year: parseInt(year),
-		price: parseFloat(price),
-	};
-
-	cars.push(newCar);
+	const [newCar] = await db
+		.insert(cars)
+		.values({ make, model, year, price })
+		.returning();
 
 	res.status(201).json(newCar);
 });
 
-router.put("/cars/:id", (req, res) => {
+// UPDATE /cars
+router.put("/:id", async (req, res) => {
 	const carId = parseInt(req.params.id);
-	const carIndex = cars.findIndex((c) => c.id === carId);
-
-	if (carIndex === -1) {
-		return res.status(404).json({ error: "Car not found" });
-	}
-
 	const { make, model, year, price } = req.body;
 
-	if (make) cars[carIndex].make = make;
-	if (model) cars[carIndex].model = model;
-	if (year) cars[carIndex].year = parseInt(year);
-	if (price) cars[carIndex].price = parseFloat(price);
+	const car = await db.select().from(cars).where(eq(cars.id, carId));
 
-	res.json(cars[carIndex]);
-});
-
-router.delete("/cars/:id", (req, res) => {
-	const carId = parseInt(req.params.id);
-	const carIndex = cars.findIndex((c) => c.id === carId);
-
-	if (carIndex === -1) {
+	if (car.length == 0) {
 		return res.status(404).json({ error: "Car not found" });
 	}
 
-	const deletedCar = cars.splice(carIndex, 1)[0];
+	const [updatedCar] = await db
+		.update(cars)
+		.set({ make, model, year, price })
+		.where(eq(cars.id, carId))
+		.returning();
 
-	res.json({
-		message: "Car deleted successfully",
-		car: deletedCar,
-	});
+	res.json(updatedCar);
 });
 
-router.get("/cars/:id", (req, res) => {
+// DELETE /cars
+router.delete("/:id", async (req, res) => {
 	const carId = parseInt(req.params.id);
-	const car = cars.find((c) => c.id === carId);
+	const car = await db.select().from(cars).where(eq(cars.id, carId));
 
-	if (!car) {
+	if (car.length === 0) {
 		return res.status(404).json({ error: "Car not found" });
 	}
 
-	res.json(car);
+	await db.delete(cars).where(eq(cars.id, carId));
+	res.send(`Car with ID ${carId} has been deleted.`);
 });
 
-app.use("/api/v1", router);
+app.use("/cars", router);
 
 app.use((err, req, res, next) => {
 	console.error("Error:", err.message);
